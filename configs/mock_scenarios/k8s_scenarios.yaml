@@ -1,0 +1,495 @@
+# =============================================================================
+# K8s Mock Scenarios
+# =============================================================================
+#
+# Each scenario defines the data returned by the K8s mock API endpoints.
+# Active scenario can be switched at runtime via:
+#   POST /scenario/{name}
+# =============================================================================
+
+global_config:
+  resource_quota:
+    cpu_limit: "10"
+    cpu_used: "4.5"
+    mem_limit: "32Gi"
+    mem_used: "14Gi"
+
+scenarios:
+  # ---------------------------------------------------------------------------
+  # default — healthy cluster
+  # ---------------------------------------------------------------------------
+  default:
+    pods:
+      - name: "order-svc-7f3a"
+        namespace: "prod"
+        status: "Running"
+        ready: true
+        restarts: 0
+        cpu_m: "320m"
+        memory: "0.8Gi"
+        node: "node-03"
+        version: "v2.3.0"
+      - name: "order-svc-8g2b"
+        namespace: "prod"
+        status: "Running"
+        ready: true
+        restarts: 0
+        cpu_m: "280m"
+        memory: "0.7Gi"
+        node: "node-04"
+        version: "v2.3.0"
+      - name: "payment-svc-3k1c"
+        namespace: "prod"
+        status: "Running"
+        ready: true
+        restarts: 0
+        cpu_m: "150m"
+        memory: "0.5Gi"
+        node: "node-03"
+        version: "v1.8.0"
+      - name: "redis-prod-01"
+        namespace: "prod"
+        status: "Running"
+        ready: true
+        restarts: 0
+        cpu_m: "600m"
+        memory: "4.2Gi"
+        node: "node-05"
+        version: "7.2.0"
+    events: []
+    deploy_history:
+      - version: "v2.3.0"
+        deployed_at: "2025-06-10T14:00:00Z"
+        image: "order-svc:v2.3.0"
+        trigger: "CI-CD"
+        status: "active"
+      - version: "v2.2.1"
+        deployed_at: "2025-06-03T10:30:00Z"
+        image: "order-svc:v2.2.1"
+        trigger: "CI-CD"
+        status: "superseded"
+    node_metrics:
+      node-03:
+        cpu: "35%"
+        mem: "45%"
+        disk_io: "80MB/s"
+      node-04:
+        cpu: "28%"
+        mem: "38%"
+        disk_io: "60MB/s"
+      node-05:
+        cpu: "52%"
+        mem: "62%"
+        disk_io: "120MB/s"
+
+  # ---------------------------------------------------------------------------
+  # oom — Pod OOMKilled after new deployment
+  # ---------------------------------------------------------------------------
+  oom:
+    pods:
+      - name: "order-svc-7f3a"
+        namespace: "prod"
+        status: "OOMKilled"
+        ready: false
+        restarts: 15
+        cpu_m: "1950m"
+        memory: "3.9Gi"
+        node: "node-03"
+        version: "v2.4.0"
+      - name: "order-svc-8g2b"
+        namespace: "prod"
+        status: "OOMKilled"
+        ready: false
+        restarts: 12
+        cpu_m: "1900m"
+        memory: "3.8Gi"
+        node: "node-04"
+        version: "v2.4.0"
+      - name: "payment-svc-3k1c"
+        namespace: "prod"
+        status: "Running"
+        ready: true
+        restarts: 0
+        cpu_m: "150m"
+        memory: "0.5Gi"
+        node: "node-03"
+        version: "v1.8.0"
+    events:
+      - time: "2025-06-15T02:33:10Z"
+        type: "Warning"
+        reason: "OOMKilled"
+        message: "Container order-svc exceeded memory limit of 4Gi"
+        pod: "order-svc-7f3a"
+      - time: "2025-06-15T02:33:15Z"
+        type: "Warning"
+        reason: "OOMKilled"
+        message: "Container order-svc exceeded memory limit of 4Gi"
+        pod: "order-svc-8g2b"
+      - time: "2025-06-15T02:33:20Z"
+        type: "Warning"
+        reason: "BackOff"
+        message: "Back-off restarting failed container"
+        pod: "order-svc-7f3a"
+    deploy_history:
+      - version: "v2.4.0"
+        deployed_at: "2025-06-15T02:00:00Z"
+        image: "order-svc:v2.4.0"
+        trigger: "CI-CD"
+        status: "active"
+      - version: "v2.3.0"
+        deployed_at: "2025-06-10T14:00:00Z"
+        image: "order-svc:v2.3.0"
+        trigger: "CI-CD"
+        status: "superseded"
+    resource_quota:
+      cpu_limit: "10"
+      cpu_used: "9.8"
+      mem_limit: "32Gi"
+      mem_used: "31Gi"
+    node_metrics:
+      node-03:
+        cpu: "94%"
+        mem: "97%"
+        disk_io: "350MB/s"
+      node-04:
+        cpu: "92%"
+        mem: "95%"
+        disk_io: "320MB/s"
+      node-05:
+        cpu: "55%"
+        mem: "65%"
+        disk_io: "130MB/s"
+
+  # ---------------------------------------------------------------------------
+  # crash_loop — Pod stuck in CrashLoopBackOff
+  # ---------------------------------------------------------------------------
+  crash_loop:
+    pods:
+      - name: "inventory-svc-2x9p"
+        namespace: "prod"
+        status: "CrashLoopBackOff"
+        ready: false
+        restarts: 42
+        cpu_m: "0m"
+        memory: "0Gi"
+        node: "node-02"
+        version: "v3.1.0"
+      - name: "inventory-svc-7y4q"
+        namespace: "prod"
+        status: "CrashLoopBackOff"
+        ready: false
+        restarts: 38
+        cpu_m: "0m"
+        memory: "0Gi"
+        node: "node-03"
+        version: "v3.1.0"
+    events:
+      - time: "2025-06-15T04:10:05Z"
+        type: "Warning"
+        reason: "CrashLoopBackOff"
+        message: "Container crashed on startup: java.lang.NoClassDefFoundError"
+        pod: "inventory-svc-2x9p"
+    deploy_history:
+      - version: "v3.1.0"
+        deployed_at: "2025-06-15T04:05:00Z"
+        image: "inventory-svc:v3.1.0"
+        trigger: "CI-CD"
+        status: "active"
+      - version: "v3.0.0"
+        deployed_at: "2025-06-08T09:00:00Z"
+        image: "inventory-svc:v3.0.0"
+        trigger: "CI-CD"
+        status: "superseded"
+    node_metrics:
+      node-02:
+        cpu: "42%"
+        mem: "55%"
+        disk_io: "200MB/s"
+      node-03:
+        cpu: "40%"
+        mem: "50%"
+        disk_io: "180MB/s"
+
+  # ---------------------------------------------------------------------------
+  # crash_loop_backoff — Pod CrashLoopBackOff with init failure
+  # ---------------------------------------------------------------------------
+  crash_loop_backoff:
+    pods:
+      - name: "notification-svc-4f2k"
+        namespace: "prod"
+        status: "CrashLoopBackOff"
+        ready: false
+        restarts: 67
+        cpu_m: "0m"
+        memory: "0Gi"
+        node: "node-04"
+        version: "v2.0.1"
+    events:
+      - time: "2025-06-15T06:22:10Z"
+        type: "Warning"
+        reason: "CrashLoopBackOff"
+        message: "Back-off restarting failed container: liveness probe failed after 3 attempts"
+        pod: "notification-svc-4f2k"
+      - time: "2025-06-15T06:21:50Z"
+        type: "Warning"
+        reason: "Unhealthy"
+        message: "Liveness probe failed: Get http://10.244.1.15:8080/health: dial tcp 10.244.1.15:8080: connect: connection refused"
+        pod: "notification-svc-4f2k"
+    deploy_history:
+      - version: "v2.0.1"
+        deployed_at: "2025-06-15T06:20:00Z"
+        image: "notification-svc:v2.0.1"
+        trigger: "Manual"
+        status: "active"
+    node_metrics:
+      node-04:
+        cpu: "25%"
+        mem: "35%"
+        disk_io: "40MB/s"
+
+  # ---------------------------------------------------------------------------
+  # image_pull_backoff — ErrImagePull / ImagePullBackOff
+  # ---------------------------------------------------------------------------
+  image_pull_backoff:
+    pods:
+      - name: "analytics-svc-9j3h"
+        namespace: "prod"
+        status: "ImagePullBackOff"
+        ready: false
+        restarts: 0
+        cpu_m: "0m"
+        memory: "0Gi"
+        node: "node-01"
+        version: "v5.0.0-beta"
+    events:
+      - time: "2025-06-15T07:10:00Z"
+        type: "Warning"
+        reason: "Failed"
+        message: "Failed to pull image \"analytics-svc:v5.0.0-beta\": rpc error: code = NotFound desc = manifest not found"
+        pod: "analytics-svc-9j3h"
+      - time: "2025-06-15T07:11:00Z"
+        type: "Warning"
+        reason: "Failed"
+        message: "Error: ErrImagePull"
+        pod: "analytics-svc-9j3h"
+      - time: "2025-06-15T07:12:00Z"
+        type: "Warning"
+        reason: "Failed"
+        message: "Error: ImagePullBackOff"
+        pod: "analytics-svc-9j3h"
+    deploy_history:
+      - version: "v5.0.0-beta"
+        deployed_at: "2025-06-15T07:09:00Z"
+        image: "analytics-svc:v5.0.0-beta"
+        trigger: "CI-CD"
+        status: "active"
+    node_metrics:
+      node-01:
+        cpu: "15%"
+        mem: "20%"
+        disk_io: "30MB/s"
+
+  # ---------------------------------------------------------------------------
+  # node_not_ready — Kubelet stopped reporting
+  # ---------------------------------------------------------------------------
+  node_not_ready:
+    pods:
+      - name: "order-svc-7f3a"
+        namespace: "prod"
+        status: "Unknown"
+        ready: false
+        restarts: 0
+        cpu_m: "?"
+        memory: "?"
+        node: "node-03"
+        version: "v2.3.0"
+      - name: "payment-svc-3k1c"
+        namespace: "prod"
+        status: "Unknown"
+        ready: false
+        restarts: 0
+        cpu_m: "?"
+        memory: "?"
+        node: "node-03"
+        version: "v1.8.0"
+    events:
+      - time: "2025-06-15T08:00:05Z"
+        type: "Warning"
+        reason: "NodeNotReady"
+        message: "Node node-03 status is now NodeNotReady"
+        pod: ""
+    node_metrics:
+      node-03:
+        cpu: "?"
+        mem: "?"
+        disk_io: "?"
+      node-04:
+        cpu: "65%"
+        mem: "72%"
+        disk_io: "280MB/s"
+    resource_quota:
+      cpu_limit: "10"
+      cpu_used: "4.0"
+      mem_limit: "32Gi"
+      mem_used: "12Gi"
+
+  # ---------------------------------------------------------------------------
+  # pvc_full — PersistentVolume full
+  # ---------------------------------------------------------------------------
+  pvc_full:
+    pods:
+      - name: "postgres-prod-01"
+        namespace: "prod"
+        status: "Running"
+        ready: true
+        restarts: 0
+        cpu_m: "200m"
+        memory: "1.5Gi"
+        node: "node-05"
+        version: "15.3"
+    events:
+      - time: "2025-06-15T09:30:00Z"
+        type: "Warning"
+        reason: "FailedScheduling"
+        message: "0/4 nodes are available: 1 node(s) had volume node affinity conflict, 3 node(s) didn't match Pod's node affinity/selector"
+        pod: ""
+      - time: "2025-06-15T09:25:00Z"
+        type: "Warning"
+        reason: "VolumeFull"
+        message: "PVC postgres-prod-pvc is 98% full (196Gi/200Gi)"
+        pod: "postgres-prod-01"
+    resource_quota:
+      cpu_limit: "10"
+      cpu_used: "5.2"
+      mem_limit: "32Gi"
+      mem_used: "16Gi"
+    node_metrics:
+      node-05:
+        cpu: "45%"
+        mem: "55%"
+        disk_io: "400MB/s"
+
+  # ---------------------------------------------------------------------------
+  # hpa_thrashing — HPA频繁扩缩容
+  # ---------------------------------------------------------------------------
+  hpa_thrashing:
+    pods:
+      - name: "order-svc-7f3a"
+        namespace: "prod"
+        status: "Running"
+        ready: true
+        restarts: 2
+        cpu_m: "1800m"
+        memory: "3.2Gi"
+        node: "node-03"
+        version: "v2.4.0"
+      - name: "order-svc-8g2b"
+        namespace: "prod"
+        status: "Running"
+        ready: true
+        restarts: 1
+        cpu_m: "1750m"
+        memory: "3.0Gi"
+        node: "node-04"
+        version: "v2.4.0"
+      - name: "order-svc-9h3c"
+        namespace: "prod"
+        status: "Terminating"
+        ready: false
+        restarts: 0
+        cpu_m: "800m"
+        memory: "1.5Gi"
+        node: "node-03"
+        version: "v2.4.0"
+      - name: "order-svc-0i4d"
+        namespace: "prod"
+        status: "ContainerCreating"
+        ready: false
+        restarts: 0
+        cpu_m: "0m"
+        memory: "0Gi"
+        node: "node-04"
+        version: "v2.4.0"
+    events:
+      - time: "2025-06-15T10:15:00Z"
+        type: "Warning"
+        reason: "FailedGetResourceMetric"
+        message: "HPA was unable to compute the replica count: unable to get metrics"
+        pod: ""
+      - time: "2025-06-15T10:14:30Z"
+        type: "Normal"
+        reason: "ScalingReplicaSet"
+        message: "Scaled up replica set order-svc-7f3a to 5"
+        pod: ""
+      - time: "2025-06-15T10:13:00Z"
+        type: "Normal"
+        reason: "ScalingReplicaSet"
+        message: "Scaled down replica set order-svc-7f3a to 2"
+        pod: ""
+    deploy_history:
+      - version: "v2.4.0"
+        deployed_at: "2025-06-15T10:00:00Z"
+        image: "order-svc:v2.4.0"
+        trigger: "CI-CD"
+        status: "active"
+    node_metrics:
+      node-03:
+        cpu: "88%"
+        mem: "78%"
+        disk_io: "310MB/s"
+      node-04:
+        cpu: "85%"
+        mem: "74%"
+        disk_io: "290MB/s"
+
+  # ---------------------------------------------------------------------------
+  # stale_endpoints — Service Endpoints not updated after Pod deletion
+  # ---------------------------------------------------------------------------
+  stale_endpoints:
+    pods:
+      - name: "order-svc-7f3a"
+        namespace: "prod"
+        status: "Running"
+        ready: true
+        restarts: 0
+        cpu_m: "320m"
+        memory: "0.8Gi"
+        node: "node-03"
+        version: "v2.3.0"
+    events:
+      - time: "2025-06-15T11:05:00Z"
+        type: "Warning"
+        reason: "Unhealthy"
+        message: "Readiness probe failed: Get http://10.244.1.99:8080/ready: connection refused"
+        pod: "order-svc-old-deleted"
+    node_metrics:
+      node-03:
+        cpu: "45%"
+        mem: "55%"
+        disk_io: "90MB/s"
+
+  # ---------------------------------------------------------------------------
+  # init_container_failure — init container fails, blocking Pod start
+  # ---------------------------------------------------------------------------
+  init_container_failure:
+    pods:
+      - name: "ml-inference-svc-1k5m"
+        namespace: "prod"
+        status: "Init:Error"
+        ready: false
+        restarts: 0
+        cpu_m: "0m"
+        memory: "0Gi"
+        node: "node-06"
+        version: "v1.2.0"
+    events:
+      - time: "2025-06-15T14:20:00Z"
+        type: "Warning"
+        reason: "Failed"
+        message: "Error: init container model-downloader failed: exit code 1"
+        pod: "ml-inference-svc-1k5m"
+    node_metrics:
+      node-06:
+        cpu: "18%"
+        mem: "28%"
+        disk_io: "120MB/s"

@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>工业故障自愈 — 审批面板</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f0f2f5; color: #1a1a2e; min-height: 100vh; }
+.header { background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); color: #fff; padding: 20px 32px; display: flex; justify-content: space-between; align-items: center; }
+.header h1 { font-size: 20px; font-weight: 600; }
+.header .badge { background: #e94560; color: #fff; border-radius: 12px; padding: 4px 12px; font-size: 13px; }
+.status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+.status-dot.connected { background: #4caf50; }
+.status-dot.disconnected { background: #f44336; }
+.container { max-width: 1100px; margin: 24px auto; padding: 0 16px; }
+.filters { display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap; }
+.filters button { padding: 8px 20px; border: 1px solid #d9d9d9; border-radius: 6px; background: #fff; cursor: pointer; font-size: 14px; transition: all .2s; }
+.filters button:hover { border-color: #e94560; color: #e94560; }
+.filters button.active { background: #e94560; color: #fff; border-color: #e94560; }
+.card { background: #fff; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,.08); margin-bottom: 16px; overflow: hidden; transition: box-shadow .2s; }
+.card:hover { box-shadow: 0 4px 12px rgba(0,0,0,.12); }
+.card-header { padding: 16px 20px; border-bottom: 1px solid #f0f0f0; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
+.card-title { font-weight: 600; font-size: 15px; }
+.risk-badge { display: inline-block; padding: 2px 10px; border-radius: 4px; font-size: 12px; font-weight: 600; }
+.risk-medium { background: #fff3e0; color: #e65100; }
+.risk-high { background: #ffebee; color: #c62828; }
+.card-body { padding: 16px 20px; font-size: 14px; line-height: 1.7; }
+.card-body .label { color: #888; font-size: 12px; text-transform: uppercase; letter-spacing: .5px; }
+.card-body pre { background: #f5f5f5; border-radius: 6px; padding: 12px; font-size: 13px; overflow-x: auto; margin: 8px 0; max-height: 200px; }
+.card-footer { padding: 12px 20px; border-top: 1px solid #f0f0f0; display: flex; gap: 10px; justify-content: flex-end; }
+.btn { padding: 8px 24px; border: none; border-radius: 6px; font-size: 14px; font-weight: 500; cursor: pointer; transition: all .2s; }
+.btn-approve { background: #4caf50; color: #fff; }
+.btn-approve:hover { background: #43a047; }
+.btn-reject { background: #f44336; color: #fff; }
+.btn-reject:hover { background: #e53935; }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.empty { text-align: center; padding: 60px 20px; color: #999; }
+.empty svg { width: 64px; height: 64px; margin-bottom: 16px; opacity: .3; }
+.expires { font-size: 12px; color: #999; }
+.approver-list { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.approver-chip { padding: 2px 10px; border-radius: 12px; font-size: 12px; background: #e8f5e9; color: #2e7d32; }
+.approver-chip.rejected { background: #ffebee; color: #c62828; }
+.timer { font-family: monospace; font-size: 13px; color: #e65100; }
+.modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,.5); z-index: 1000; justify-content: center; align-items: center; }
+.modal.active { display: flex; }
+.modal-content { background: #fff; border-radius: 12px; padding: 24px; width: 90%; max-width: 480px; }
+.modal-content h3 { margin-bottom: 16px; }
+.modal-content textarea { width: 100%; border: 1px solid #d9d9d9; border-radius: 6px; padding: 10px; font-size: 14px; resize: vertical; min-height: 80px; }
+.modal-footer { display: flex; gap: 10px; justify-content: flex-end; margin-top: 16px; }
+</style>
+</head>
+<body>
+<div class="header">
+  <div>
+    <h1>工业故障自愈 — 审批面板</h1>
+    <span style="font-size:13px;opacity:.7;">Human-in-the-Loop Safety Gate</span>
+  </div>
+  <div style="display:flex;align-items:center;gap:16px;">
+    <span><span class="status-dot" id="ws-dot"></span><span id="ws-text">连接中...</span></span>
+    <span class="badge" id="count-badge">0 待审批</span>
+  </div>
+</div>
+
+<div class="container">
+  <div class="filters">
+    <button class="active" data-filter="all">全部</button>
+    <button data-filter="medium">中风险</button>
+    <button data-filter="high">高风险</button>
+  </div>
+
+  <div id="approval-list"></div>
+</div>
+
+<!-- Reject Modal -->
+<div class="modal" id="reject-modal">
+  <div class="modal-content">
+    <h3>驳回审批</h3>
+    <p style="margin-bottom:12px;color:#666;">请输入驳回理由：</p>
+    <textarea id="reject-reason" placeholder="例如：当前正在产线盘点，延迟30分钟再变更..."></textarea>
+    <div class="modal-footer">
+      <button class="btn" style="background:#e0e0e0;" onclick="closeModal()">取消</button>
+      <button class="btn btn-reject" id="confirm-reject">确认驳回</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── Config ──
+const API_BASE = window.location.origin.replace(':3000', ':8300');
+const WS_URL = API_BASE.replace('http', 'ws') + '/api/v1/approvals/ws';
+const API_KEY = 'dev-key-change-me';
+let currentFilter = 'all';
+let rejectTargetId = null;
+
+// ── WebSocket ──
+function connectWS() {
+  const ws = new WebSocket(WS_URL);
+  ws.onopen = () => {
+    document.getElementById('ws-dot').className = 'status-dot connected';
+    document.getElementById('ws-text').textContent = '实时连接';
+  };
+  ws.onclose = () => {
+    document.getElementById('ws-dot').className = 'status-dot disconnected';
+    document.getElementById('ws-text').textContent = '断开，5s后重连';
+    setTimeout(connectWS, 5000);
+  };
+  ws.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    if (msg.type === 'new_approval' || msg.type === 'approval_updated' || msg.type === 'approval_expired') {
+      loadPending();
+    }
+  };
+}
+connectWS();
+
+// ── Load ──
+async function loadPending() {
+  const resp = await fetch(API_BASE + '/api/v1/approvals/pending?limit=50', {
+    headers: { 'X-API-Key': API_KEY }
+  });
+  const data = await resp.json();
+  renderList(data.items);
+  document.getElementById('count-badge').textContent = data.total + ' 待审批';
+}
+
+function renderList(items) {
+  const filtered = currentFilter === 'all' ? items : items.filter(i => i.risk_level === currentFilter);
+  const el = document.getElementById('approval-list');
+
+  if (!filtered.length) {
+    el.innerHTML = `<div class="empty">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+      <p>没有待审批项</p>
+    </div>`;
+    return;
+  }
+
+  el.innerHTML = filtered.map(a => {
+    const plan = a.self_healing_plan || {};
+    const actions = plan.actions || [];
+    const riskCls = a.risk_level === 'high' ? 'risk-high' : 'risk-medium';
+    const required = a.required_approvers;
+    const current = a.current_approvals;
+    const approversHtml = a.approvers.map(ap =>
+      `<span class="approver-chip ${ap.action === 'rejected' ? 'rejected' : ''}">${ap.user_id}: ${ap.action === 'approved' ? '已批准' : '已驳回'}</span>`
+    ).join('');
+
+    const expiresAt = new Date(a.expires_at);
+    const now = new Date();
+    const remaining = Math.max(0, Math.floor((expiresAt - now) / 1000));
+    const timerHtml = `<span class="timer">⏱ ${Math.floor(remaining/60)}分${remaining%60}秒</span>`;
+
+    return `<div class="card">
+      <div class="card-header">
+        <span class="card-title">${escapeHtml(a.summary || '审批 #' + a.approval_id.substring(0,8))}</span>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <span class="risk-badge ${riskCls}">${a.risk_level === 'high' ? '高风险' : '中风险'}</span>
+          <span style="font-size:12px;">${current}/${required} 已批准</span>
+          ${timerHtml}
+        </div>
+      </div>
+      <div class="card-body">
+        <span class="label">审批 ID</span>: ${a.approval_id}<br>
+        <span class="label">诊断追踪 ID</span>: ${a.supervisor_trace_id}<br>
+        <span class="label">自愈动作</span>:
+        <pre>${escapeHtml(JSON.stringify(actions, null, 2))}</pre>
+        ${approversHtml ? `<span class="label">审批人</span>: <div class="approver-list">${approversHtml}</div>` : ''}
+      </div>
+      <div class="card-footer">
+        <button class="btn btn-approve" onclick="approve('${a.approval_id}')">批准</button>
+        <button class="btn btn-reject" onclick="openReject('${a.approval_id}')">驳回</button>
+      </div>
+    </div>`;
+  }).join('');
+
+  // Update timers every 30s
+  setTimeout(loadPending, 30000);
+}
+
+// ── Actions ──
+async function approve(id) {
+  const resp = await fetch(API_BASE + '/api/v1/approvals/' + id + '/approve', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-API-Key': API_KEY },
+    body: JSON.stringify({ user_id: 'engineer-' + Date.now(), comment: '批准执行' })
+  });
+  if (resp.ok) {
+    loadPending();
+  } else {
+    const err = await resp.json();
+    alert('批准失败: ' + (err.detail || '未知错误'));
+  }
+}
+
+function openReject(id) {
+  rejectTargetId = id;
+  document.getElementById('reject-modal').classList.add('active');
+  document.getElementById('reject-reason').value = '';
+}
+
+function closeModal() {
+  document.getElementById('reject-modal').classList.remove('active');
+  rejectTargetId = null;
+}
+
+document.getElementById('confirm-reject').addEventListener('click', async () => {
+  const reason = document.getElementById('reject-reason').value.trim();
+  if (!reason) { alert('请输入驳回理由'); return; }
+  const resp = await fetch(API_BASE + '/api/v1/approvals/' + rejectTargetId + '/reject', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-API-Key': API_KEY },
+    body: JSON.stringify({ user_id: 'engineer-' + Date.now(), reason })
+  });
+  if (resp.ok) {
+    closeModal();
+    loadPending();
+  } else {
+    const err = await resp.json();
+    alert('驳回失败: ' + (err.detail || '未知错误'));
+  }
+});
+
+// ── Filters ──
+document.querySelectorAll('.filters button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.filters button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    currentFilter = btn.dataset.filter;
+    loadPending();
+  });
+});
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+// Initial load
+loadPending();
+</script>
+</body>
+</html>

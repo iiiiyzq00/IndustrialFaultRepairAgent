@@ -1,0 +1,333 @@
+# =============================================================================
+# Network Mock Scenarios
+# =============================================================================
+
+global_config:
+  ping:
+    default_rtt_ms: 1.0
+    default_loss_pct: 0.0
+    jitter_ms: 0.3
+  traceroute:
+    hops:
+      - { hop: 1, addr: "10.0.0.1", rtt_ms: 0.5 }
+      - { hop: 2, addr: "10.0.0.2", rtt_ms: 1.2 }
+      - { hop: 3, addr: "redis-prod-01.prod.svc.cluster.local", rtt_ms: 2.0 }
+  dns:
+    "redis-prod-01.prod.svc.cluster.local": { resolved: true, ips: ["10.3.2.15"], ttl_ms: 12 }
+    "order-svc.prod.svc.cluster.local":     { resolved: true, ips: ["10.1.1.8"],  ttl_ms: 15 }
+  svc_mesh:
+    redis-prod-01:  { request_rate: 850, error_rate_5xx: 0.01, latency_p99_ms: 5.0 }
+    order-svc:      { request_rate: 1200, error_rate_5xx: 0.00, latency_p99_ms: 90.0 }
+    payment-svc:    { request_rate: 600, error_rate_5xx: 0.00, latency_p99_ms: 45.0 }
+
+scenarios:
+  # ---------------------------------------------------------------------------
+  # default — healthy network
+  # ---------------------------------------------------------------------------
+  default: {}
+
+  # ---------------------------------------------------------------------------
+  # packet_loss — 15% loss between order-svc and Redis
+  # ---------------------------------------------------------------------------
+  packet_loss:
+    ping:
+      default_rtt_ms: 1.0
+      default_loss_pct: 0.0
+      jitter_ms: 0.3
+      targets:
+        redis-prod-01.prod.svc.cluster.local:
+          rtt_ms: 45.0
+          loss_pct: 15.0
+    traceroute:
+      hops:
+        - { hop: 1, addr: "10.0.0.1", rtt_ms: 0.6 }
+        - { hop: 2, addr: "10.0.0.2", rtt_ms: 42.3 }
+        - { hop: 3, addr: "redis-prod-01.prod.svc.cluster.local", rtt_ms: 48.0 }
+    svc_mesh:
+      order-svc:
+        request_rate: 1200
+        error_rate_5xx: 0.08
+        latency_p99_ms: 1200.0
+      redis-prod-01:
+        request_rate: 850
+        error_rate_5xx: 0.05
+        latency_p99_ms: 800.0
+
+  # ---------------------------------------------------------------------------
+  # dns_failure — DNS not resolving Redis hostname
+  # ---------------------------------------------------------------------------
+  dns_failure:
+    dns:
+      "redis-prod-01.prod.svc.cluster.local":
+        resolved: false
+        ips: []
+        error: "NXDOMAIN"
+        ttl_ms: 0
+      "order-svc.prod.svc.cluster.local":
+        resolved: true
+        ips: ["10.1.1.8"]
+        ttl_ms: 15
+    svc_mesh:
+      order-svc:
+        request_rate: 200
+        error_rate_5xx: 0.65
+        latency_p99_ms: 5000.0
+
+  # ---------------------------------------------------------------------------
+  # network_partition — complete isolation of a segment
+  # ---------------------------------------------------------------------------
+  network_partition:
+    ping:
+      default_rtt_ms: 1.0
+      default_loss_pct: 0.0
+      targets:
+        redis-prod-01.prod.svc.cluster.local:
+          rtt_ms: -1
+          loss_pct: 100.0
+        payment-svc.prod.svc.cluster.local:
+          rtt_ms: -1
+          loss_pct: 100.0
+    traceroute:
+      hops:
+        - { hop: 1, addr: "10.0.0.1", rtt_ms: 0.5 }
+        - { hop: 2, addr: "*", rtt_ms: -1 }
+    svc_mesh:
+      order-svc:
+        request_rate: 50
+        error_rate_5xx: 0.95
+        latency_p99_ms: 30000.0
+
+  # ---------------------------------------------------------------------------
+  # proxy_timeout — reverse proxy timeout
+  # ---------------------------------------------------------------------------
+  proxy_timeout:
+    ping:
+      source: "gateway-svc"
+      target: "order-svc.prod.svc.cluster.local"
+      count: 5
+      min_ms: 45200
+      avg_ms: 50120
+      max_ms: 55100
+      loss_pct: 0.0
+    traceroute:
+      hops:
+        - { hop: 1, addr: "10.0.0.1", rtt_ms: 0.5 }
+        - { hop: 2, addr: "10.0.1.5", rtt_ms: 1.2 }
+        - { hop: 3, addr: "10.0.2.10", rtt_ms: 49850.0 }
+    dns:
+      hostname: "order-svc.prod.svc.cluster.local"
+      resolved: true
+      ips: ["10.0.2.10"]
+      ttl_ms: 30000
+    svc_mesh:
+      gateway-svc:
+        request_rate: 3200
+        error_rate_5xx: 42.0
+        latency_p99_ms: 52000.0
+      order-svc:
+        request_rate: 2800
+        error_rate_5xx: 0.5
+        latency_p99_ms: 45.0
+
+  # ---------------------------------------------------------------------------
+  # firewall_rule_change — firewall rule change causes selective packet loss
+  # ---------------------------------------------------------------------------
+  firewall_rule_change:
+    ping:
+      source: "order-svc"
+      target: "payment-svc.prod.svc.cluster.local"
+      count: 10
+      min_ms: 1.5
+      avg_ms: 450.0
+      max_ms: 5000.0
+      loss_pct: 45.0
+    traceroute:
+      hops:
+        - { hop: 1, addr: "10.0.0.1", rtt_ms: 0.5 }
+        - { hop: 2, addr: "10.0.0.254", rtt_ms: 1.0 }
+        - { hop: 3, addr: "*", rtt_ms: -1 }
+        - { hop: 4, addr: "*", rtt_ms: -1 }
+        - { hop: 5, addr: "10.0.2.20", rtt_ms: 450.0 }
+    dns:
+      hostname: "payment-svc.prod.svc.cluster.local"
+      resolved: true
+      ips: ["10.0.2.20"]
+      ttl_ms: 30000
+    svc_mesh:
+      order-svc:
+        request_rate: 1200
+        error_rate_5xx: 38.0
+        latency_p99_ms: 4800.0
+
+  # ---------------------------------------------------------------------------
+  # ssl_expiry — SSL/TLS certificate about to expire
+  # ---------------------------------------------------------------------------
+  ssl_expiry:
+    ping:
+      source: "gateway-svc"
+      target: "api.external-partner.com"
+      count: 5
+      min_ms: 25.0
+      avg_ms: 28.0
+      max_ms: 32.0
+      loss_pct: 0.0
+    traceroute:
+      hops:
+        - { hop: 1, addr: "10.0.0.1", rtt_ms: 0.5 }
+        - { hop: 2, addr: "203.0.113.1", rtt_ms: 28.0 }
+    dns:
+      hostname: "api.external-partner.com"
+      resolved: true
+      ips: ["203.0.113.1"]
+      ttl_ms: 60000
+    svc_mesh:
+      gateway-svc:
+        request_rate: 2500
+        error_rate_5xx: 18.0
+        latency_p99_ms: 3200.0
+
+  # ---------------------------------------------------------------------------
+  # bandwidth_saturation — network bandwidth saturated
+  # ---------------------------------------------------------------------------
+  bandwidth_saturation:
+    ping:
+      source: "order-svc"
+      target: "redis-prod-01.prod.svc.cluster.local"
+      count: 8
+      min_ms: 120.0
+      avg_ms: 850.0
+      max_ms: 2500.0
+      loss_pct: 12.0
+    traceroute:
+      hops:
+        - { hop: 1, addr: "10.0.0.1", rtt_ms: 0.5 }
+        - { hop: 2, addr: "10.0.1.1", rtt_ms: 120.0 }
+        - { hop: 3, addr: "10.0.5.10", rtt_ms: 850.0 }
+    dns:
+      hostname: "redis-prod-01.prod.svc.cluster.local"
+      resolved: true
+      ips: ["10.0.5.10"]
+      ttl_ms: 30000
+    svc_mesh:
+      order-svc:
+        request_rate: 5200
+        error_rate_5xx: 22.0
+        latency_p99_ms: 2800.0
+      redis-prod-01:
+        request_rate: 4800
+        error_rate_5xx: 0.2
+        latency_p99_ms: 15.0
+
+  # ---------------------------------------------------------------------------
+  # dns_cache_poisoning — DNS cache poisoning detected
+  # ---------------------------------------------------------------------------
+  dns_cache_poisoning:
+    ping:
+      source: "order-svc"
+      target: "redis-prod-01.prod.svc.cluster.local"
+      count: 5
+      min_ms: 0.8
+      avg_ms: 1.5
+      max_ms: 3.0
+      loss_pct: 0.0
+    traceroute:
+      hops:
+        - { hop: 1, addr: "10.0.0.1", rtt_ms: 0.5 }
+        - { hop: 2, addr: "192.168.99.99", rtt_ms: 1.5 }
+    dns:
+      hostname: "redis-prod-01.prod.svc.cluster.local"
+      resolved: true
+      ips: ["192.168.99.99"]
+      ttl_ms: 86400000
+    svc_mesh:
+      order-svc:
+        request_rate: 1200
+        error_rate_5xx: 85.0
+        latency_p99_ms: 50.0
+
+  # ---------------------------------------------------------------------------
+  # mtu_mismatch — MTU mismatch between network segments
+  # ---------------------------------------------------------------------------
+  mtu_mismatch:
+    ping:
+      source: "gateway-svc"
+      target: "payment-svc.prod.svc.cluster.local"
+      count: 5
+      min_ms: 1.2
+      avg_ms: 250.0
+      max_ms: 5000.0
+      loss_pct: 0.0
+    traceroute:
+      hops:
+        - { hop: 1, addr: "10.0.0.1", rtt_ms: 0.5 }
+        - { hop: 2, addr: "10.0.1.1", rtt_ms: 1.2 }
+        - { hop: 3, addr: "10.0.2.20", rtt_ms: 250.0 }
+    dns:
+      hostname: "payment-svc.prod.svc.cluster.local"
+      resolved: true
+      ips: ["10.0.2.20"]
+      ttl_ms: 30000
+    svc_mesh:
+      payment-svc:
+        request_rate: 800
+        error_rate_5xx: 15.0
+        latency_p99_ms: 4800.0
+
+  # ---------------------------------------------------------------------------
+  # tcp_retransmit_storm — excessive TCP retransmissions
+  # ---------------------------------------------------------------------------
+  tcp_retransmit_storm:
+    ping:
+      source: "order-svc"
+      target: "inventory-svc.prod.svc.cluster.local"
+      count: 10
+      min_ms: 8.0
+      avg_ms: 1200.0
+      max_ms: 8000.0
+      loss_pct: 35.0
+    traceroute:
+      hops:
+        - { hop: 1, addr: "10.0.0.1", rtt_ms: 0.5 }
+        - { hop: 2, addr: "10.0.1.1", rtt_ms: 8.0 }
+        - { hop: 3, addr: "*", rtt_ms: -1 }
+        - { hop: 4, addr: "10.0.3.15", rtt_ms: 1200.0 }
+    dns:
+      hostname: "inventory-svc.prod.svc.cluster.local"
+      resolved: true
+      ips: ["10.0.3.15"]
+      ttl_ms: 30000
+    svc_mesh:
+      order-svc:
+        request_rate: 2200
+        error_rate_5xx: 28.0
+        latency_p99_ms: 7500.0
+
+  # ---------------------------------------------------------------------------
+  # bgp_route_hijack — BGP route hijack detected
+  # ---------------------------------------------------------------------------
+  bgp_route_hijack:
+    ping:
+      source: "gateway-svc"
+      target: "cdn.cache.external.com"
+      count: 5
+      min_ms: 250.0
+      avg_ms: 380.0
+      max_ms: 520.0
+      loss_pct: 0.0
+    traceroute:
+      hops:
+        - { hop: 1, addr: "10.0.0.1", rtt_ms: 0.5 }
+        - { hop: 2, addr: "203.0.113.1", rtt_ms: 5.0 }
+        - { hop: 3, addr: "198.51.100.50", rtt_ms: 120.0 }
+        - { hop: 4, addr: "198.51.100.99", rtt_ms: 180.0 }
+        - { hop: 5, addr: "10.255.255.1", rtt_ms: 250.0 }
+    dns:
+      hostname: "cdn.cache.external.com"
+      resolved: true
+      ips: ["10.255.255.1"]
+      ttl_ms: 300000
+    svc_mesh:
+      gateway-svc:
+        request_rate: 1500
+        error_rate_5xx: 45.0
+        latency_p99_ms: 5200.0

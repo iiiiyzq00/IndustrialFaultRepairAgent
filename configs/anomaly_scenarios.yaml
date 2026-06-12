@@ -1,0 +1,382 @@
+# =============================================================================
+# Fake Data Generator — Anomaly Injection Scenarios
+# =============================================================================
+#
+# Each scenario is a list of rules. A rule matches nodes by node_id prefix
+# and metrics by name.  When active, the generator overrides normal values.
+#
+# Usage:
+#   POST /scenarios/{name}/activate     — activate a scenario
+#   POST /scenarios/deactivate          — return to normal
+# =============================================================================
+
+scenarios:
+
+  # ---------------------------------------------------------------------------
+  # latency_spike — order-svc P99 latency jumps to 1200ms (5× normal)
+  #   Simulates: new version introduces Redis KEYS * blocking
+  # ---------------------------------------------------------------------------
+  latency_spike:
+    - name: "order-svc latency spike"
+      target_nodes: ["order-svc"]
+      target_metrics: ["p99_latency_ms"]
+      multiplier: 15.0          # 80ms → 1200ms
+      duration_seconds: 600
+
+    - name: "order-svc error rate rise"
+      target_nodes: ["order-svc"]
+      target_metrics: ["error_rate"]
+      fixed_value: 5.2          # 5.2% error rate
+      duration_seconds: 600
+
+    - name: "redis cpu spike"
+      target_nodes: ["redis-prod-01"]
+      target_metrics: ["cpu_usage"]
+      fixed_value: 94.0
+      duration_seconds: 600
+
+  # ---------------------------------------------------------------------------
+  # oom_cascade — order-svc OOMKilled after memory leak
+  # ---------------------------------------------------------------------------
+  oom_cascade:
+    - name: "order-svc memory leak"
+      target_nodes: ["order-svc"]
+      target_metrics: ["mem_usage", "cpu_usage"]
+      multiplier: 3.2
+      adder: 15.0
+      duration_seconds: 300
+      start_offset_seconds: 30
+
+    - name: "order-svc restart storm"
+      target_nodes: ["order-svc"]
+      target_metrics: ["restart_count"]
+      fixed_value: 15
+      duration_seconds: 300
+      start_offset_seconds: 60
+
+    - name: "node-03 resource pressure"
+      target_nodes: ["k8s-node-03"]
+      target_metrics: ["cpu_usage", "mem_usage"]
+      fixed_value: 97.0
+      duration_seconds: 300
+
+  # ---------------------------------------------------------------------------
+  # network_degradation — packet loss between services
+  # ---------------------------------------------------------------------------
+  network_degradation:
+    - name: "packet loss order-svc → redis"
+      target_nodes: ["order-svc"]
+      target_metrics: ["p99_latency_ms"]
+      multiplier: 8.0
+      duration_seconds: 600
+
+    - name: "packet loss order-svc → redis"
+      target_nodes: ["order-svc"]
+      target_metrics: ["error_rate"]
+      fixed_value: 8.0
+      duration_seconds: 600
+
+    - name: "connection pool exhaustion"
+      target_nodes: ["order-svc", "payment-svc"]
+      target_metrics: ["connection_pool_used"]
+      multiplier: 3.5
+      duration_seconds: 600
+
+  # ---------------------------------------------------------------------------
+  # queue_buildup — Kafka consumer lag / message queue depth spike
+  # ---------------------------------------------------------------------------
+  queue_buildup:
+    - name: "gateway message queue depth"
+      target_nodes: ["gateway-svc"]
+      target_metrics: ["queue_depth"]
+      multiplier: 20.0
+      adder: 50.0
+      duration_seconds: 600
+
+    - name: "edge gateway queue overflow"
+      target_nodes: ["EdgeGW"]
+      target_metrics: ["msg_queue_depth"]
+      multiplier: 15.0
+      adder: 30.0
+      duration_seconds: 600
+
+  # ---------------------------------------------------------------------------
+  # disk_pressure — disk full on servers
+  # ---------------------------------------------------------------------------
+  disk_pressure:
+    - name: "k8s node disk near full"
+      target_nodes: ["k8s-node"]
+      target_metrics: ["disk_usage"]
+      fixed_value: 97.0
+      duration_seconds: 900
+
+    - name: "edge gateway disk pressure"
+      target_nodes: ["EdgeGW"]
+      target_metrics: ["disk_usage"]
+      fixed_value: 95.0
+      duration_seconds: 900
+
+  # ---------------------------------------------------------------------------
+  # multi_line_failure — cross-line incident (precision_machining temperature)
+  # ---------------------------------------------------------------------------
+  multi_line_failure:
+    - name: "CNC overheat"
+      target_nodes: ["CNC-Mill-L1"]
+      target_metrics: ["temperature_c"]
+      multiplier: 1.8
+      adder: 15.0
+      duration_seconds: 600
+
+    - name: "CNC vibration anomaly"
+      target_nodes: ["CNC-Mill-L1"]
+      target_metrics: ["vibration_um"]
+      multiplier: 5.0
+      duration_seconds: 600
+
+    - name: "PLC comms degradation"
+      target_nodes: ["PLC-L1"]
+      target_metrics: ["comms_latency_ms"]
+      multiplier: 20.0
+      adder: 10.0
+      duration_seconds: 600
+
+  # ---------------------------------------------------------------------------
+  # agv_battery_critical — AGV fleet battery depletion
+  # ---------------------------------------------------------------------------
+  agv_battery_critical:
+    - name: "AGV battery drain"
+      target_nodes: ["AGV"]
+      target_metrics: ["battery_pct"]
+      fixed_value: 12.0
+      duration_seconds: 600
+
+    - name: "AGV wifi signal weak"
+      target_nodes: ["AGV"]
+      target_metrics: ["wifi_signal_dbm"]
+      fixed_value: -85.0
+      duration_seconds: 600
+
+  # ---------------------------------------------------------------------------
+  # connection_storm — too many connections to services / middleware
+  # ---------------------------------------------------------------------------
+  connection_storm:
+    - name: "connection count spike"
+      target_nodes: ["order-svc", "gateway-svc", "redis-prod-01"]
+      target_metrics: ["connection_count", "connection_pool_used"]
+      multiplier: 10.0
+      adder: 200.0
+      duration_seconds: 300
+
+    - name: "error rate rise from rejected connections"
+      target_nodes: ["order-svc", "gateway-svc"]
+      target_metrics: ["error_rate"]
+      fixed_value: 12.0
+      duration_seconds: 300
+
+  # ---------------------------------------------------------------------------
+  # db_connection_exhaustion — MySQL connection pool exhausted
+  # ---------------------------------------------------------------------------
+  db_connection_exhaustion:
+    - name: "mysql connection pool full"
+      target_nodes: ["payment-svc", "order-svc"]
+      target_metrics: ["connection_count", "error_rate"]
+      multiplier: 8.0
+      adder: 50.0
+      duration_seconds: 400
+
+    - name: "mysql slow query spike"
+      target_nodes: ["mysql-prod-01"]
+      target_metrics: ["cpu_usage", "disk_io_mbps"]
+      fixed_value: 96.0
+      duration_seconds: 400
+
+  # ---------------------------------------------------------------------------
+  # kafka_consumer_lag — consumer group lag spike
+  # ---------------------------------------------------------------------------
+  kafka_consumer_lag:
+    - name: "kafka consumer lag buildup"
+      target_nodes: ["order-svc", "payment-svc"]
+      target_metrics: ["queue_depth", "p99_latency_ms"]
+      multiplier: 25.0
+      adder: 100.0
+      duration_seconds: 500
+
+    - name: "kafka broker disk pressure"
+      target_nodes: ["kafka-broker-01"]
+      target_metrics: ["disk_io_mbps", "cpu_usage"]
+      fixed_value: 98.0
+      duration_seconds: 500
+
+  # ---------------------------------------------------------------------------
+  # dns_timeout — DNS resolution timeout
+  # ---------------------------------------------------------------------------
+  dns_timeout:
+    - name: "DNS resolution timeout"
+      target_nodes: ["gateway-svc", "order-svc"]
+      target_metrics: ["p99_latency_ms", "error_rate"]
+      multiplier: 6.0
+      adder: 30.0
+      duration_seconds: 300
+
+    - name: "DNS server CPU spike"
+      target_nodes: ["dns-server-01"]
+      target_metrics: ["cpu_usage"]
+      fixed_value: 94.0
+      duration_seconds: 300
+
+  # ---------------------------------------------------------------------------
+  # memory_leak_slow — gradual memory leak (slow ramp)
+  # ---------------------------------------------------------------------------
+  memory_leak_slow:
+    - name: "slow memory leak order-svc"
+      target_nodes: ["order-svc"]
+      target_metrics: ["mem_usage", "cpu_usage"]
+      multiplier: 1.15
+      adder: 2.0
+      duration_seconds: 900
+      start_offset_seconds: 60
+
+    - name: "GC pause time increase"
+      target_nodes: ["order-svc"]
+      target_metrics: ["p99_latency_ms"]
+      multiplier: 4.0
+      adder: 5.0
+      duration_seconds: 900
+      start_offset_seconds: 300
+
+  # ---------------------------------------------------------------------------
+  # cpu_throttling — CPU throttled by K8s limit
+  # ---------------------------------------------------------------------------
+  cpu_throttling:
+    - name: "CPU throttling hit limit"
+      target_nodes: ["order-svc", "payment-svc"]
+      target_metrics: ["cpu_usage"]
+      fixed_value: 99.0
+      duration_seconds: 400
+
+    - name: "throttling causes latency spike"
+      target_nodes: ["order-svc", "payment-svc"]
+      target_metrics: ["p99_latency_ms", "queue_depth"]
+      multiplier: 5.0
+      duration_seconds: 400
+
+  # ---------------------------------------------------------------------------
+  # plc_comms_timeout — PLC communication timeout
+  # ---------------------------------------------------------------------------
+  plc_comms_timeout:
+    - name: "PLC Modbus timeout"
+      target_nodes: ["PLC-L1", "PLC-L2"]
+      target_metrics: ["comms_latency_ms", "error_rate"]
+      multiplier: 30.0
+      adder: 50.0
+      duration_seconds: 300
+
+    - name: "PLC watchdog reset"
+      target_nodes: ["PLC-L1"]
+      target_metrics: ["cpu_usage"]
+      fixed_value: 100.0
+      duration_seconds: 300
+
+  # ---------------------------------------------------------------------------
+  # cnc_tool_wear — CNC tool wear causing precision drift
+  # ---------------------------------------------------------------------------
+  cnc_tool_wear:
+    - name: "CNC tool wear vibration"
+      target_nodes: ["CNC-Mill-L1", "CNC-Lathe-L1"]
+      target_metrics: ["vibration_um", "joint_deviation_deg"]
+      multiplier: 3.5
+      adder: 2.0
+      duration_seconds: 600
+      start_offset_seconds: 120
+
+    - name: "CNC spindle temperature rise"
+      target_nodes: ["CNC-Mill-L1"]
+      target_metrics: ["temperature_c"]
+      multiplier: 1.5
+      adder: 10.0
+      duration_seconds: 600
+
+  # ---------------------------------------------------------------------------
+  # gateway_throttling — API gateway rate limiting
+  # ---------------------------------------------------------------------------
+  gateway_throttling:
+    - name: "gateway rate limit enforced"
+      target_nodes: ["gateway-svc"]
+      target_metrics: ["request_rate", "error_rate"]
+      multiplier: 0.3
+      fixed_value: 18.0
+      duration_seconds: 400
+
+    - name: "upstream services idle"
+      target_nodes: ["order-svc", "payment-svc"]
+      target_metrics: ["request_rate"]
+      fixed_value: 5.0
+      duration_seconds: 400
+
+  # ---------------------------------------------------------------------------
+  # config_drift — configuration mismatch between services
+  # ---------------------------------------------------------------------------
+  config_drift:
+    - name: "config version mismatch"
+      target_nodes: ["order-svc", "inventory-svc"]
+      target_metrics: ["error_rate", "p99_latency_ms"]
+      multiplier: 5.0
+      adder: 10.0
+      duration_seconds: 500
+
+    - name: "TLS cipher mismatch"
+      target_nodes: ["gateway-svc"]
+      target_metrics: ["error_rate"]
+      fixed_value: 25.0
+      duration_seconds: 500
+
+  # ---------------------------------------------------------------------------
+  # ntp_time_skew — NTP time sync skew
+  # ---------------------------------------------------------------------------
+  ntp_time_skew:
+    - name: "NTP clock drift detected"
+      target_nodes: ["gateway-svc", "order-svc", "payment-svc"]
+      target_metrics: ["error_rate", "p99_latency_ms"]
+      multiplier: 4.0
+      adder: 15.0
+      duration_seconds: 600
+
+    - name: "token validation failures"
+      target_nodes: ["gateway-svc"]
+      target_metrics: ["error_rate"]
+      fixed_value: 35.0
+      duration_seconds: 600
+
+  # ---------------------------------------------------------------------------
+  # node_disk_full — host disk full
+  # ---------------------------------------------------------------------------
+  node_disk_full:
+    - name: "node root disk near full"
+      target_nodes: ["k8s-node-01", "k8s-node-02"]
+      target_metrics: ["disk_usage", "disk_io_mbps"]
+      fixed_value: 98.0
+      duration_seconds: 800
+
+    - name: "disk IO wait spike"
+      target_nodes: ["k8s-node-01", "k8s-node-02"]
+      target_metrics: ["cpu_usage"]
+      fixed_value: 92.0
+      duration_seconds: 800
+
+  # ---------------------------------------------------------------------------
+  # load_balancer_failure — LB health check failure
+  # ---------------------------------------------------------------------------
+  load_balancer_failure:
+    - name: "LB health check failing"
+      target_nodes: ["gateway-svc"]
+      target_metrics: ["error_rate", "connection_count"]
+      multiplier: 12.0
+      adder: 100.0
+      duration_seconds: 300
+
+    - name: "traffic shift imbalance"
+      target_nodes: ["order-svc", "payment-svc"]
+      target_metrics: ["cpu_usage", "queue_depth"]
+      multiplier: 3.0
+      adder: 20.0
+      duration_seconds: 300

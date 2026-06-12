@@ -1,0 +1,5 @@
+services/agent-supervisor/data/*.db
+services/agent-supervisor/data/*.db-shm
+services/agent-supervisor/data/*.db-wal
+__pycache__/
+*.pyc

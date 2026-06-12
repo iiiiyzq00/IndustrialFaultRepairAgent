@@ -1,0 +1,11 @@
+# =============================================================================
+# Grafana Dashboard Provisioning — Auto-load industrial-aiops dashboard
+# =============================================================================
+apiVersion: 1
+
+providers:
+  - name: "Industrial AIOps"
+    folder: "Industrial"
+    type: file
+    options:
+      path: /etc/grafana/dashboards

@@ -1,0 +1,101 @@
+{
+  "total_runs": 10,
+  "successful_runs": 0,
+  "avg_duration_s": 34.7,
+  "p99_duration_s": 38.5,
+  "max_duration_s": 38.5,
+  "avg_confidence": 0.89,
+  "self_heal_success_rate": 0.0,
+  "results": [
+    {
+      "run": 1,
+      "fault": "redis_slow_query",
+      "trace_id": "trace-88c0c4719b14",
+      "status": "rollback_triggered",
+      "duration_s": 32.4,
+      "confidence": 0.85,
+      "strategy": "unanimous"
+    },
+    {
+      "run": 2,
+      "fault": "network_packet_loss",
+      "trace_id": "trace-03f617ee97c5",
+      "status": "rollback_triggered",
+      "duration_s": 34.5,
+      "confidence": 0.95,
+      "strategy": "adversarial_debate"
+    },
+    {
+      "run": 3,
+      "fault": "redis_slow_query",
+      "trace_id": "trace-5927a8b28f50",
+      "status": "rollback_triggered",
+      "duration_s": 32.4,
+      "confidence": 0.85,
+      "strategy": "unanimous"
+    },
+    {
+      "run": 4,
+      "fault": "network_packet_loss",
+      "trace_id": "trace-bef0083d9411",
+      "status": "rollback_triggered",
+      "duration_s": 36.5,
+      "confidence": 0.95,
+      "strategy": "adversarial_debate"
+    },
+    {
+      "run": 5,
+      "fault": "redis_slow_query",
+      "trace_id": "trace-1385ae9b5076",
+      "status": "rollback_triggered",
+      "duration_s": 32.5,
+      "confidence": 0.85,
+      "strategy": "unanimous"
+    },
+    {
+      "run": 6,
+      "fault": "network_packet_loss",
+      "trace_id": "trace-ba906450d9d7",
+      "status": "rollback_triggered",
+      "duration_s": 36.6,
+      "confidence": 0.95,
+      "strategy": "adversarial_debate"
+    },
+    {
+      "run": 7,
+      "fault": "redis_slow_query",
+      "trace_id": "trace-be3f785d918b",
+      "status": "rollback_triggered",
+      "duration_s": 34.7,
+      "confidence": 0.85,
+      "strategy": "unanimous"
+    },
+    {
+      "run": 8,
+      "fault": "network_packet_loss",
+      "trace_id": "trace-2ba22af56de6",
+      "status": "rollback_triggered",
+      "duration_s": 38.5,
+      "confidence": 0.9,
+      "strategy": "adversarial_debate"
+    },
+    {
+      "run": 9,
+      "fault": "redis_slow_query",
+      "trace_id": "trace-cf130b5b39f4",
+      "status": "rollback_triggered",
+      "duration_s": 32.5,
+      "confidence": 0.85,
+      "strategy": "unanimous"
+    },
+    {
+      "run": 10,
+      "fault": "network_packet_loss",
+      "trace_id": "trace-0dace58eb2ec",
+      "status": "rollback_triggered",
+      "duration_s": 36.5,
+      "confidence": 0.95,
+      "strategy": "adversarial_debate"
+    }
+  ]
+}

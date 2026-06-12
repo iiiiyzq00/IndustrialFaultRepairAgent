@@ -1,0 +1,319 @@
+# =============================================================================
+# Redis / Middleware Mock Scenarios
+# =============================================================================
+
+global_config:
+  config:
+    maxmemory-policy: "noeviction"
+    maxmemory: "10Gi"
+    save: "900 1 300 10"
+    appendonly: "yes"
+  info:
+    redis_version: "7.2.0"
+    uptime_in_seconds: 2592000
+    connected_clients: 48
+    used_memory_human: "8.2Gi"
+    used_memory_peak_human: "9.5Gi"
+    total_commands_processed: 158320000
+    instantaneous_ops_per_sec: 850
+    keyspace_hits: 142000000
+    keyspace_misses: 8200000
+
+scenarios:
+  # ---------------------------------------------------------------------------
+  # default — healthy Redis
+  # ---------------------------------------------------------------------------
+  default:
+    slowlog: []
+    info:
+      instantaneous_ops_per_sec: 850
+      latest_fork_usec: 1200
+
+  # ---------------------------------------------------------------------------
+  # slow_query — KEYS * blocking Redis (maps to real-world incident)
+  # ---------------------------------------------------------------------------
+  slow_query:
+    slowlog:
+      - id: 1234
+        timestamp: "2025-06-15T02:33:05Z"
+        duration_us: 1520000
+        command: "KEYS *"
+        client_ip: "10.0.1.5"
+        client_name: "order-svc-7f3a"
+      - id: 1233
+        timestamp: "2025-06-15T02:33:02Z"
+        duration_us: 1480000
+        command: "KEYS *"
+        client_ip: "10.0.1.5"
+        client_name: "order-svc-7f3a"
+      - id: 1232
+        timestamp: "2025-06-15T02:32:58Z"
+        duration_us: 1350000
+        command: "KEYS *"
+        client_ip: "10.0.1.5"
+        client_name: "order-svc-7f3a"
+      - id: 1231
+        timestamp: "2025-06-15T02:32:55Z"
+        duration_us: 1620000
+        command: "KEYS *"
+        client_ip: "10.0.1.5"
+        client_name: "order-svc-8g2b"
+      - id: 1230
+        timestamp: "2025-06-15T02:32:50Z"
+        duration_us: 1410000
+        command: "KEYS *"
+        client_ip: "10.0.1.5"
+        client_name: "order-svc-8g2b"
+      - id: 1229
+        timestamp: "2025-06-15T02:32:45Z"
+        duration_us: 1280000
+        command: "KEYS order:cache:*"
+        client_ip: "10.0.1.5"
+        client_name: "order-svc-7f3a"
+      - id: 1228
+        timestamp: "2025-06-15T02:32:40Z"
+        duration_us: 1150000
+        command: "HGETALL order:session:*"
+        client_ip: "10.0.1.8"
+        client_name: "payment-svc-3k1c"
+      - id: 1227
+        timestamp: "2025-06-15T02:32:30Z"
+        duration_us: 950000
+        command: "SCAN 0 MATCH order:* COUNT 1000"
+        client_ip: "10.0.1.5"
+        client_name: "order-svc-7f3a"
+    config:
+      maxmemory-policy: "noeviction"
+      maxmemory: "10Gi"
+    info:
+      instantaneous_ops_per_sec: 12
+      latest_fork_usec: 8500000
+      blocked_clients: 47
+      used_memory_human: "9.4Gi"
+
+  # ---------------------------------------------------------------------------
+  # memory_pressure — Redis near OOM
+  # ---------------------------------------------------------------------------
+  memory_pressure:
+    slowlog:
+      - id: 2200
+        timestamp: "2025-06-15T08:15:00Z"
+        duration_us: 850000
+        command: "SADD events:recent ..."
+        client_ip: "10.0.2.1"
+        client_name: "analytics-svc-1a2b"
+    config:
+      maxmemory-policy: "noeviction"
+      maxmemory: "10Gi"
+    info:
+      instantaneous_ops_per_sec: 210
+      used_memory_human: "9.8Gi"
+      used_memory_peak_human: "9.9Gi"
+      evicted_keys: 12000
+
+  # ---------------------------------------------------------------------------
+  # connection_storm — too many client connections
+  # ---------------------------------------------------------------------------
+  connection_storm:
+    slowlog: []
+    config:
+      maxclients: "10000"
+    info:
+      connected_clients: 9850
+      rejected_connections: 340
+      instantaneous_ops_per_sec: 45
+
+  # ---------------------------------------------------------------------------
+  # maxmemory_eviction — reached maxmemory, keys being evicted
+  # ---------------------------------------------------------------------------
+  maxmemory_eviction:
+    slowlog:
+      - id: 2001
+        timestamp: "2025-06-15T14:00:05Z"
+        duration_us: 5000
+        command: "SET order:10293:status completed EX 3600"
+        client_ip: "10.0.1.5"
+        client_name: "order-svc-7f3a"
+    config:
+      maxmemory: "4gb"
+      maxmemory-policy: "allkeys-lru"
+      maxclients: "10000"
+    info:
+      redis_version: "7.2.0"
+      uptime_in_seconds: 864000
+      connected_clients: 320
+      used_memory_human: "3.98Gi"
+      used_memory_peak_human: "4.00Gi"
+      instantaneous_ops_per_sec: 1200
+      keyspace_hits: 45000000
+      keyspace_misses: 320000
+      evicted_keys: 85400
+      blocked_clients: 15
+      latest_fork_usec: 25000
+
+  # ---------------------------------------------------------------------------
+  # replica_lag — master-replica replication lag too high
+  # ---------------------------------------------------------------------------
+  replica_lag:
+    slowlog:
+      - id: 3001
+        timestamp: "2025-06-15T15:10:00Z"
+        duration_us: 3500000
+        command: "BGSAVE"
+        client_ip: "127.0.0.1"
+        client_name: ""
+    config:
+      maxmemory: "4gb"
+      maxmemory-policy: "noeviction"
+      maxclients: "10000"
+    info:
+      redis_version: "7.2.0"
+      uptime_in_seconds: 500000
+      connected_clients: 180
+      used_memory_human: "2.8Gi"
+      used_memory_peak_human: "3.2Gi"
+      instantaneous_ops_per_sec: 2800
+      keyspace_hits: 78000000
+      keyspace_misses: 150000
+      evicted_keys: 0
+      blocked_clients: 0
+      master_repl_offset: 9876543210
+      slave_repl_offset: 9876540000
+      master_sync_in_progress: 0
+      connected_slaves: 2
+      slave0_state: "online"
+      slave0_offset: 9876538000
+      slave0_lag: 5210
+      slave1_state: "online"
+      slave1_offset: 9876480000
+      slave1_lag: 63210
+      latest_fork_usec: 45000
+
+  # ---------------------------------------------------------------------------
+  # sentinel_failover — Sentinel triggered master-slave failover
+  # ---------------------------------------------------------------------------
+  sentinel_failover:
+    slowlog:
+      - id: 4001
+        timestamp: "2025-06-15T16:05:30Z"
+        duration_us: 1200000
+        command: "CLUSTER INFO"
+        client_ip: "10.0.1.10"
+        client_name: "sentinel-01"
+      - id: 4002
+        timestamp: "2025-06-15T16:05:31Z"
+        duration_us: 800000
+        command: "SLAVEOF NO ONE"
+        client_ip: "127.0.0.1"
+        client_name: ""
+    config:
+      maxmemory: "4gb"
+      maxmemory-policy: "noeviction"
+      maxclients: "10000"
+    info:
+      redis_version: "7.2.0"
+      uptime_in_seconds: 12000
+      connected_clients: 95
+      used_memory_human: "1.5Gi"
+      used_memory_peak_human: "2.8Gi"
+      instantaneous_ops_per_sec: 450
+      keyspace_hits: 2500000
+      keyspace_misses: 80000
+      evicted_keys: 0
+      blocked_clients: 3
+      role: "master"
+      connected_slaves: 1
+      slave0_state: "sync"
+      slave0_lag: 150000
+      latest_fork_usec: 18000
+
+  # ---------------------------------------------------------------------------
+  # cluster_resharding — cluster slot migration in progress
+  # ---------------------------------------------------------------------------
+  cluster_resharding:
+    slowlog:
+      - id: 5001
+        timestamp: "2025-06-15T17:20:00Z"
+        duration_us: 2500000
+        command: 'MIGRATE 10.0.2.50 6379 "" 0 5000 COPY REPLACE KEYS order:50001 order:50002'
+        client_ip: "10.0.1.12"
+        client_name: "redis-cluster-mgr"
+    config:
+      maxmemory: "4gb"
+      maxmemory-policy: "noeviction"
+      maxclients: "10000"
+    info:
+      redis_version: "7.2.0"
+      uptime_in_seconds: 350000
+      connected_clients: 210
+      used_memory_human: "2.1Gi"
+      used_memory_peak_human: "2.5Gi"
+      instantaneous_ops_per_sec: 3800
+      keyspace_hits: 35000000
+      keyspace_misses: 220000
+      evicted_keys: 0
+      blocked_clients: 42
+      cluster_enabled: 1
+      migrating_slots: 512
+      importing_slots: 0
+      latest_fork_usec: 32000
+
+  # ---------------------------------------------------------------------------
+  # keyspace_notification_storm — keyspace notifications flood
+  # ---------------------------------------------------------------------------
+  keyspace_notification_storm:
+    slowlog:
+      - id: 6001
+        timestamp: "2025-06-15T18:00:00Z"
+        duration_us: 500000
+        command: "PSUBSCRIBE __key*__:*"
+        client_ip: "10.0.1.25"
+        client_name: "event-bus-svc"
+    config:
+      maxmemory: "4gb"
+      maxmemory-policy: "noeviction"
+      maxclients: "10000"
+      notify-keyspace-events: "AKE"
+    info:
+      redis_version: "7.2.0"
+      uptime_in_seconds: 200000
+      connected_clients: 850
+      used_memory_human: "3.0Gi"
+      used_memory_peak_human: "3.5Gi"
+      instantaneous_ops_per_sec: 8500
+      keyspace_hits: 12000000
+      keyspace_misses: 450000
+      evicted_keys: 0
+      blocked_clients: 28
+      pubsub_channels: 5120
+      pubsub_patterns: 2048
+      latest_fork_usec: 15000
+
+  # ---------------------------------------------------------------------------
+  # client_connection_storm — too many client connections
+  # ---------------------------------------------------------------------------
+  client_connection_storm:
+    slowlog:
+      - id: 7001
+        timestamp: "2025-06-15T19:10:00Z"
+        duration_us: 2800000
+        command: "CLIENT LIST"
+        client_ip: "10.0.1.1"
+        client_name: "monitoring-agent"
+    config:
+      maxmemory: "4gb"
+      maxmemory-policy: "noeviction"
+      maxclients: "10000"
+    info:
+      redis_version: "7.2.0"
+      uptime_in_seconds: 450000
+      connected_clients: 9980
+      used_memory_human: "3.8Gi"
+      used_memory_peak_human: "3.9Gi"
+      instantaneous_ops_per_sec: 200
+      keyspace_hits: 5000000
+      keyspace_misses: 98000
+      evicted_keys: 0
+      blocked_clients: 95
+      rejected_connections: 1240
+      latest_fork_usec: 55000

@@ -1,0 +1,554 @@
+# =============================================================================
+# 工业故障自愈 Multi-Agent 系统 — 开发环境完整部署
+# =============================================================================
+#
+# 启动: docker compose up -d
+# 停止: docker compose down
+# 完全重置: docker compose down -v
+#
+# 前置条件:
+#   1. Docker >= 24.0, docker compose >= 2.20
+#   2. 在项目根目录创建 .env 文件:
+#        DEEPSEEK_API_KEY=sk-your-key-here
+#   3. 可选: DINGTALK_WEBHOOK_URL=https://oapi.dingtalk.com/robot/send?...
+# =============================================================================
+
+services:
+  # ========================================================================
+  # 消息队列层
+  # ========================================================================
+  zookeeper:
+    image: bitnami/zookeeper:3.9
+    container_name: ifr-zookeeper
+    ports: ["2181:2181"]
+    environment:
+      ALLOW_ANONYMOUS_LOGIN: "yes"
+    volumes: [zk_data:/bitnami/zookeeper]
+    networks: [ifr-net]
+    healthcheck:
+      test: ["CMD", "bash", "-c", "echo ruok | nc -w 2 localhost 2181"]
+      interval: 10s
+      retries: 5
+
+  kafka:
+    image: bitnami/kafka:3.6
+    container_name: ifr-kafka
+    ports:
+      - "9092:9092"
+      - "9093:9093"
+    environment:
+      KAFKA_CFG_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_CFG_LISTENERS: PLAINTEXT://:9092,EXTERNAL://:9093
+      KAFKA_CFG_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://localhost:9093
+      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: "true"
+    volumes: [kafka_data:/bitnami/kafka]
+    depends_on: { zookeeper: { condition: service_healthy } }
+    networks: [ifr-net]
+    healthcheck:
+      test: ["CMD", "kafka-topics.sh", "--bootstrap-server", "localhost:9092", "--list"]
+      interval: 15s
+      retries: 5
+
+  # ========================================================================
+  # 真实中间件层 (Redis + MySQL)
+  # ========================================================================
+  redis:
+    image: redis:7-alpine
+    container_name: ifr-redis
+    command: redis-server --requirepass dev-pass --save "" --appendonly no --loglevel warning
+    volumes: [redis_data:/data]
+    networks: [ifr-net]
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "-a", "dev-pass", "ping"]
+      interval: 5s
+      retries: 5
+
+  mysql:
+    image: mysql:8.0
+    container_name: ifr-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: dev-pass
+      MYSQL_DATABASE: industrial_db
+      MYSQL_USER: ifr_app
+      MYSQL_PASSWORD: dev-pass
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./configs/mysql/init.sql:/docker-entrypoint-initdb.d/01-init.sql
+    networks: [ifr-net]
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-pdev-pass"]
+      interval: 10s
+      retries: 15
+      start_period: 30s
+
+  # ========================================================================
+  # 流式计算层
+  # ========================================================================
+  flink-jobmanager:
+    image: flink:1.18-scala_2.12
+    container_name: ifr-flink-jm
+    ports: ["8081:8081"]
+    environment:
+      FLINK_PROPERTIES: "jobmanager.rpc.address: flink-jobmanager"
+    command: jobmanager
+    volumes:
+      - flink_jm_data:/tmp
+      - ./flink/jobs/target:/opt/flink/usrlib
+    networks: [ifr-net]
+
+  flink-taskmanager:
+    image: flink:1.18-scala_2.12
+    container_name: ifr-flink-tm
+    ports: ["6123:6123"]
+    environment:
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: flink-jobmanager
+        taskmanager.numberOfTaskSlots: 4
+        taskmanager.memory.process.size: 4096m
+    command: taskmanager
+    volumes: [flink_tm_data:/tmp]
+    depends_on: [flink-jobmanager]
+    networks: [ifr-net]
+
+  # ========================================================================
+  # HBase 时序库 (standalone)
+  # ========================================================================
+  hbase:
+    image: dajobe/hbase:latest
+    container_name: ifr-hbase
+    ports:
+      - "9095:9095"   # Thrift API
+      - "16010:16010" # Master Web UI
+    environment:
+      HBASE_STANDALONE: "true"
+    volumes:
+      - hbase_data:/data
+    networks: [ifr-net]
+    healthcheck:
+      test: ["CMD", "bash", "-c", "echo stat | nc -w 2 localhost 9095"]
+      interval: 15s
+      retries: 10
+      start_period: 30s
+
+  # ========================================================================
+  # 存储层
+  # ========================================================================
+  chromadb:
+    image: chromadb/chroma:0.5.23
+    container_name: ifr-chromadb
+    ports: ["8002:8000"]
+    environment:
+      IS_PERSISTENT: "TRUE"
+      PERSIST_DIRECTORY: /chroma/chroma
+      ANONYMIZED_TELEMETRY: "FALSE"
+    volumes: [chroma_data:/chroma/chroma]
+    networks: [ifr-net]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
+      interval: 10s
+      retries: 5
+
+  minio:
+    image: minio/minio:latest
+    container_name: ifr-minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ":9001"
+    volumes: [minio_data:/data]
+    networks: [ifr-net]
+
+  # ========================================================================
+  # Mock 服务层
+  # ========================================================================
+  k8s-mock-api:
+    build: { context: . , dockerfile: services/mock-services/Dockerfile }
+    container_name: ifr-k8s-mock
+    ports: ["9002:9002"]
+    environment:
+      SERVICE_PORT: "9002"
+      MOCK_TYPE: k8s
+      SCENARIO_PATH: /app/scenarios
+      API_KEY: dev-key-change-me
+    volumes:
+      - ./services/mock-services/app:/app/app
+      - ./services/common:/app/services/common
+      - ./configs/mock_scenarios:/app/scenarios
+    networks: [ifr-net]
+    command: uvicorn app.main:app --host 0.0.0.0 --port 9002 --reload
+
+  redis-mock-api:
+    build: { context: . , dockerfile: services/mock-services/Dockerfile }
+    container_name: ifr-redis-mock
+    ports: ["9003:9003"]
+    environment:
+      SERVICE_PORT: "9003"
+      MOCK_TYPE: redis
+      SCENARIO_PATH: /app/scenarios
+      API_KEY: dev-key-change-me
+    volumes:
+      - ./services/mock-services/app:/app/app
+      - ./services/common:/app/services/common
+      - ./configs/mock_scenarios:/app/scenarios
+    networks: [ifr-net]
+    command: uvicorn app.main:app --host 0.0.0.0 --port 9003 --reload
+
+  network-mock-api:
+    build: { context: . , dockerfile: services/mock-services/Dockerfile }
+    container_name: ifr-network-mock
+    ports: ["9004:9004"]
+    environment:
+      SERVICE_PORT: "9004"
+      MOCK_TYPE: network
+      SCENARIO_PATH: /app/scenarios
+      API_KEY: dev-key-change-me
+    volumes:
+      - ./services/mock-services/app:/app/app
+      - ./services/common:/app/services/common
+      - ./configs/mock_scenarios:/app/scenarios
+    networks: [ifr-net]
+    command: uvicorn app.main:app --host 0.0.0.0 --port 9004 --reload
+
+  # ========================================================================
+  # RAG 管线
+  # ========================================================================
+  rag-service:
+    build: { context: . , dockerfile: services/rag-service/Dockerfile }
+    container_name: ifr-rag-service
+    ports: ["8200:8200"]
+    environment:
+      SERVICE_PORT: "8200"
+      CHROMADB_HOST: chromadb
+      CHROMADB_PORT: "8000"
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DEEPSEEK_BASE_URL: https://api.deepseek.com/v1
+      EMBEDDING_MODEL: BAAI/bge-large-zh-v1.5
+      RERANKER_MODEL: BAAI/bge-reranker-v2-m3
+      RERANKER_DEVICE: cpu
+      VECTOR_WEIGHT: "0.6"
+      BM25_WEIGHT: "0.4"
+      RRF_K: "60"
+      COARSE_TOP_K: "10"
+      FINAL_TOP_K: "3"
+      SEED_FILE: /app/seed_tickets.json
+      API_KEY: dev-key-change-me
+      LOG_LEVEL: INFO
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+      HF_HOME: /root/.cache/huggingface
+      SENTENCE_TRANSFORMERS_HOME: /root/.cache/huggingface
+    volumes:
+      - ./services/rag-service/app:/app/app
+      - ./services/common:/app/services/common
+      - ./configs/seed_tickets.json:/app/seed_tickets.json
+      - ${HF_CACHE_DIR:-~/.cache/huggingface}:/root/.cache/huggingface
+      - rag_model_cache:/root/.cache/huggingface_local
+    depends_on:
+      chromadb: { condition: service_healthy }
+    networks: [ifr-net]
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8200 --reload
+
+  # ========================================================================
+  # Agent 服务层
+  # ========================================================================
+  agent-supervisor:
+    build: { context: . , dockerfile: services/agent-supervisor/Dockerfile }
+    container_name: ifr-supervisor
+    ports: ["8100:8100"]
+    environment:
+      SERVICE_PORT: "8100"
+      RAG_SERVICE_URL: http://rag-service:8200
+      HITL_GATEWAY_URL: http://hitl-gateway:8300
+      ACTION_EXECUTOR_URL: http://action-executor:8400
+      CHECKPOINT_DB: /app/data/checkpoints.db
+      KB_EXPERT_URL: http://k8s-expert:8110
+      MW_EXPERT_URL: http://middleware-expert:8120
+      NW_EXPERT_URL: http://network-expert:8130
+      APP_EXPERT_URL: http://app-expert:8140
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DEEPSEEK_BASE_URL: https://api.deepseek.com/v1
+      LLM_MODEL: deepseek-chat
+      SANDBOX_SERVICE_URL: http://sandbox-service:8500
+      EXPERT_TIMEOUT_SECONDS: "25"
+      RAG_TIMEOUT_SECONDS: "15"
+      API_KEY: dev-key-change-me
+      DINGTALK_WEBHOOK_URL: ${DINGTALK_WEBHOOK_URL:-}
+      LOG_LEVEL: INFO
+    volumes:
+      - ./services/agent-supervisor/app:/app/app
+      - ./services/common:/app/services/common
+      - ./services/agent-supervisor/data:/app/data
+    depends_on: [rag-service]
+    networks: [ifr-net]
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8100 --reload
+
+  k8s-expert:
+    build: { context: . , dockerfile: services/expert-worker/Dockerfile }
+    container_name: ifr-k8s-expert
+    ports: ["8110:8110"]
+    environment:
+      SERVICE_PORT: "8110"
+      AGENT_TYPE: k8s
+      RAG_SERVICE_URL: http://rag-service:8200
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DEEPSEEK_BASE_URL: https://api.deepseek.com/v1
+      LLM_MODEL: deepseek-chat
+      MOCK_BASE_URL: http://k8s-mock-api:9002
+      API_KEY: dev-key-change-me
+      LOG_LEVEL: INFO
+    volumes:
+      - ./services/expert-worker/app:/app/app
+      - ./services/common:/app/services/common
+      - ${HOME}/.kube/config:/root/.kube/config:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on: [agent-supervisor, k8s-mock-api]
+    networks: [ifr-net]
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8110 --reload
+
+  middleware-expert:
+    build: { context: . , dockerfile: services/expert-worker/Dockerfile }
+    container_name: ifr-middleware-expert
+    ports: ["8120:8120"]
+    environment:
+      SERVICE_PORT: "8120"
+      AGENT_TYPE: middleware
+      RAG_SERVICE_URL: http://rag-service:8200
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DEEPSEEK_BASE_URL: https://api.deepseek.com/v1
+      LLM_MODEL: deepseek-chat
+      MOCK_BASE_URL: http://redis-mock-api:9003
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: dev-pass
+      MYSQL_HOST: mysql
+      MYSQL_PORT: "3306"
+      MYSQL_USER: ifr_app
+      MYSQL_PASSWORD: dev-pass
+      MYSQL_DATABASE: industrial_db
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      API_KEY: dev-key-change-me
+      LOG_LEVEL: INFO
+    volumes:
+      - ./services/expert-worker/app:/app/app
+      - ./services/common:/app/services/common
+    depends_on: [agent-supervisor, redis-mock-api, redis, mysql, kafka]
+    networks: [ifr-net]
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8120 --reload
+
+  network-expert:
+    build: { context: . , dockerfile: services/expert-worker/Dockerfile }
+    container_name: ifr-network-expert
+    ports: ["8130:8130"]
+    environment:
+      SERVICE_PORT: "8130"
+      AGENT_TYPE: network
+      RAG_SERVICE_URL: http://rag-service:8200
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DEEPSEEK_BASE_URL: https://api.deepseek.com/v1
+      LLM_MODEL: deepseek-chat
+      MOCK_BASE_URL: http://network-mock-api:9004
+      API_KEY: dev-key-change-me
+      LOG_LEVEL: INFO
+    volumes:
+      - ./services/expert-worker/app:/app/app
+      - ./services/common:/app/services/common
+    depends_on: [agent-supervisor, network-mock-api]
+    networks: [ifr-net]
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8130 --reload
+
+  app-expert:
+    build: { context: . , dockerfile: services/expert-worker/Dockerfile }
+    container_name: ifr-app-expert
+    ports: ["8140:8140"]
+    environment:
+      SERVICE_PORT: "8140"
+      AGENT_TYPE: application
+      RAG_SERVICE_URL: http://rag-service:8200
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DEEPSEEK_BASE_URL: https://api.deepseek.com/v1
+      LLM_MODEL: deepseek-chat
+      MOCK_BASE_URL: http://k8s-mock-api:9002
+      API_KEY: dev-key-change-me
+      LOG_LEVEL: INFO
+    volumes:
+      - ./services/expert-worker/app:/app/app
+      - ./services/common:/app/services/common
+    depends_on: [agent-supervisor, k8s-mock-api]
+    networks: [ifr-net]
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8140 --reload
+
+  # ========================================================================
+  # 自愈动作执行器
+  # ========================================================================
+  action-executor:
+    build: { context: . , dockerfile: services/action-executor/Dockerfile }
+    container_name: ifr-action-executor
+    ports: ["8400:8400"]
+    environment:
+      SERVICE_PORT: "8400"
+      API_KEY: dev-key-change-me
+      DRY_RUN: "true"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: dev-pass
+      MYSQL_HOST: mysql
+      MYSQL_PORT: "3306"
+      MYSQL_USER: ifr_app
+      MYSQL_PASSWORD: dev-pass
+      LOG_LEVEL: INFO
+    volumes:
+      - ./services/action-executor/app:/app/app
+      - ./services/common:/app/services/common
+      - ${HOME}/.kube/config:/root/.kube/config:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks: [ifr-net]
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8400 --reload
+
+  # ========================================================================
+  # 数字孪生沙盒 (Digital Twin Sandbox)
+  # ========================================================================
+  sandbox-service:
+    build: { context: . , dockerfile: services/sandbox-service/Dockerfile }
+    container_name: ifr-sandbox
+    ports: ["8500:8500"]
+    environment:
+      SERVICE_PORT: "8500"
+      RAG_SERVICE_URL: http://rag-service:8200
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DEEPSEEK_BASE_URL: https://api.deepseek.com/v1
+      LLM_MODEL: deepseek-chat
+      API_KEY: dev-key-change-me
+      SANDBOX_TIMEOUT_SECONDS: "10"
+      LOG_LEVEL: INFO
+    volumes:
+      - ./services/sandbox-service/app:/app/app
+      - ./services/common:/app/services/common
+    depends_on: [rag-service]
+    networks: [ifr-net]
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8500 --reload
+
+  # ========================================================================
+  # HITL 层
+  # ========================================================================
+  hitl-gateway:
+    build: { context: . , dockerfile: services/hitl-gateway/Dockerfile }
+    container_name: ifr-hitl-gateway
+    ports: ["8300:8300"]
+    environment:
+      SERVICE_PORT: "8300"
+      SUPERVISOR_URL: http://agent-supervisor:8100
+      APPROVAL_TIMEOUT_MEDIUM_SECONDS: "300"
+      APPROVAL_TIMEOUT_HIGH_SECONDS: "600"
+      API_KEY: dev-key-change-me
+      LOG_LEVEL: INFO
+    volumes:
+      - ./services/hitl-gateway/app:/app/app
+      - ./services/common:/app/services/common
+    depends_on: [agent-supervisor]
+    networks: [ifr-net]
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8300 --reload
+
+  hitl-frontend:
+    image: nginx:alpine
+    container_name: ifr-hitl-frontend
+    ports: ["3000:80"]
+    volumes:
+      - ./services/hitl-frontend/index.html:/usr/share/nginx/html/index.html:ro
+      - ./services/hitl-frontend/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on: [hitl-gateway]
+    networks: [ifr-net]
+
+  # ========================================================================
+  # 监控层 (Prometheus + Grafana)
+  # ========================================================================
+  prometheus:
+    image: prom/prometheus:v2.52.0
+    container_name: ifr-prometheus
+    ports: ["9090:9090"]
+    volumes:
+      - ./configs/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=7d"
+      - "--web.enable-lifecycle"
+    networks: [ifr-net]
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:10.4.0
+    container_name: ifr-grafana
+    ports: ["3002:3000"]
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_INSTALL_PLUGINS: ""
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./configs/grafana/datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
+      - ./configs/grafana/dashboards.yml:/etc/grafana/provisioning/dashboards/dashboards.yml:ro
+      - ./dashboards/industrial-aiops.json:/etc/grafana/dashboards/industrial-aiops.json:ro
+    depends_on: [prometheus]
+    networks: [ifr-net]
+    restart: unless-stopped
+
+  # ========================================================================
+  # 模拟数据生成器
+  # ========================================================================
+  fake-data-generator:
+    build: { context: . , dockerfile: services/fake-data-generator/Dockerfile }
+    container_name: ifr-fake-generator
+    ports: ["9005:9005"]
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      TOPIC_METRICS: industrial-metrics
+      TOPIC_ALERTS: industrial-alerts
+      INTERVAL_MS: "1000"
+      TIME_MULTIPLIER: "1.0"
+      ANOMALY_CONFIG_PATH: /app/anomaly_scenarios.yaml
+      ANOMALY_INJECTION_ENABLED: "true"
+      ANOMALY_AUTO_START: ""
+      API_PORT: "9005"
+      API_KEY: dev-key-change-me
+      HBASE_HOST: hbase
+      HBASE_PORT: "9095"
+      LOG_LEVEL: INFO
+    volumes:
+      - ./services/fake-data-generator/app:/app/app
+      - ./services/common:/app/services/common
+      - ./configs/anomaly_scenarios.yaml:/app/anomaly_scenarios.yaml
+    depends_on:
+      kafka: { condition: service_healthy }
+    networks: [ifr-net]
+    command: python -u -m app.main
+    restart: unless-stopped
+
+# ============================================================================
+# Networks & Volumes
+# ============================================================================
+networks:
+  ifr-net:
+    driver: bridge
+    name: ifr-network
+
+volumes:
+  zk_data:
+  kafka_data:
+  redis_data:
+  mysql_data:
+  flink_jm_data:
+  flink_tm_data:
+  chroma_data:
+  minio_data:
+  rag_model_cache:
+  prometheus_data:
+  grafana_data:
+  hbase_data:

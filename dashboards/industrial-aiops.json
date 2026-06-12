@@ -1,0 +1,72 @@
+{
+  "title": "Industrial Fault Repair — AIOps Dashboard",
+  "uid": "ifr-aiops",
+  "panels": [
+    {
+      "title": "Diagnosis Throughput",
+      "type": "stat",
+      "targets": [{"expr": "rate(ifr_diagnosis_total[5m])"}],
+      "fieldConfig": { "defaults": { "unit": "reqps" } }
+    },
+    {
+      "title": "Active Diagnoses",
+      "type": "gauge",
+      "targets": [{"expr": "ifr_active_diagnoses"}],
+      "fieldConfig": { "defaults": { "max": 20, "thresholds": { "steps": [{"value": 5, "color": "green"}, {"value": 10, "color": "orange"}, {"value": 15, "color": "red"}] } } }
+    },
+    {
+      "title": "MTTR (P50/P95/P99)",
+      "type": "timeseries",
+      "targets": [
+        {"expr": "histogram_quantile(0.50, rate(ifr_diagnosis_duration_seconds_bucket[5m]))", "legendFormat": "P50"},
+        {"expr": "histogram_quantile(0.95, rate(ifr_diagnosis_duration_seconds_bucket[5m]))", "legendFormat": "P95"},
+        {"expr": "histogram_quantile(0.99, rate(ifr_diagnosis_duration_seconds_bucket[5m]))", "legendFormat": "P99"}
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } }
+    },
+    {
+      "title": "Diagnosis Confidence Distribution",
+      "type": "heatmap",
+      "targets": [{"expr": "rate(ifr_diagnosis_confidence_bucket[5m])"}]
+    },
+    {
+      "title": "Self-Healing Success Rate",
+      "type": "stat",
+      "targets": [{"expr": "sum(rate(ifr_diagnosis_total{status=\"success\"}[1h])) / sum(rate(ifr_diagnosis_total[1h])) * 100"}],
+      "fieldConfig": { "defaults": { "unit": "percent" } }
+    },
+    {
+      "title": "HITL Approvals",
+      "type": "bargauge",
+      "targets": [
+        {"expr": "ifr_hitl_approval_total{status=\"pending\"}", "legendFormat": "Pending"},
+        {"expr": "ifr_hitl_approval_total{status=\"approved\"}", "legendFormat": "Approved"},
+        {"expr": "ifr_hitl_approval_total{status=\"rejected\"}", "legendFormat": "Rejected"},
+        {"expr": "ifr_hitl_approval_total{status=\"expired\"}", "legendFormat": "Expired"}
+      ]
+    },
+    {
+      "title": "RAG Document Count",
+      "type": "stat",
+      "targets": [{"expr": "ifr_rag_document_count"}],
+      "fieldConfig": { "defaults": { "thresholds": { "steps": [{"value": 50, "color": "red"}, {"value": 100, "color": "orange"}, {"value": 200, "color": "green"}] } } }
+    },
+    {
+      "title": "Action Execution Status",
+      "type": "piechart",
+      "targets": [{"expr": "ifr_action_execution_total", "legendFormat": "{{action_type}}={{status}}"}]
+    },
+    {
+      "title": "Expert Tool Calls",
+      "type": "timeseries",
+      "targets": [{"expr": "rate(ifr_expert_tool_calls_total[5m])", "legendFormat": "{{agent_type}}/{{tool_name}}"}]
+    },
+    {
+      "title": "HTTP Request Rate",
+      "type": "timeseries",
+      "targets": [{"expr": "rate(ifr_http_requests_total[5m])", "legendFormat": "{{method}} {{endpoint}}"}]
+    }
+  ],
+  "refresh": "10s",
+  "time": { "from": "now-1h", "to": "now" }
+}
